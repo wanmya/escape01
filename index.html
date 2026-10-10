@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>コンクリートの部屋からの脱出</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one 16:9 stage centered on a concrete-dark ground; HUD, inventory and arrows float on the stage edges */
+:root {
+  --ground: #16181a;
+  --ink: #e6e8e6;
+  --muted: #8d9493;
+  --panel: rgba(18, 20, 21, 0.62);
+  --panel-solid: #202426;
+  --door: #3fae2a;
+  --select: #e8c35a;
+  --font-ui: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  display: grid;
+  place-items: center;
+  padding-inline: 16px;
+  box-sizing: border-box;
+  overflow: hidden;
+  margin: 0;
+  --slot: clamp(44px, 5.5vw, 68px);
+}
+/* ゲーム画面＋アイテム欄。画面の高さに収まる幅にする */
+.game {
+  width: min(100%, calc((100vh - var(--slot) - 56px) * 16 / 9));
+  width: min(100%, calc((100dvh - var(--slot) - 56px) * 16 / 9));
+  display: flex; flex-direction: column; gap: 10px;
+}
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.stage img.view {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transition: opacity .25s ease;
+  pointer-events: none;
+}
+.stage img.view.fading { opacity: 0; }
+
+.hotspot {
+  position: absolute;
+  cursor: pointer;
+  border: 0; padding: 0; background: transparent;
+  border-radius: 2px;
+}
+.hotspot:focus-visible { outline: 2px solid rgba(255,255,255,.35); outline-offset: 2px; }
+.debug .hotspot { background: rgba(255, 60, 60, .25); outline: 2px dashed #ff5a5a; }
+
+.turn {
+  position: absolute; top: 50%;
+  transform: translateY(-50%);
+  width: clamp(36px, 5vw, 56px); height: clamp(56px, 10vw, 96px);
+  border: 0; border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: clamp(18px, 2.4vw, 28px);
+  cursor: pointer;
+  opacity: .8;
+  transition: opacity .15s;
+}
+.turn:hover, .turn:focus-visible { opacity: 1; }
+.turn.left { left: 1%; }
+.turn.right { right: 1%; }
+
+.hud {
+  position: absolute; left: 50%; top: 2.5%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  padding: .25em .9em;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1.3vw, 15px);
+  letter-spacing: .12em;
+  color: var(--muted);
+  pointer-events: none;
+}
+.hud b { color: var(--ink); font-weight: 500; }
+
+.back {
+  position: absolute; left: 50%; bottom: 3%;
+  transform: translateX(-50%);
+  border: 0; border-radius: 3px;
+  background: var(--panel); color: var(--ink);
+  font: 700 clamp(12px, 1.4vw, 16px) var(--font-ui);
+  padding: .45em 1.4em;
+  cursor: pointer;
+}
+.back:hover, .back:focus-visible { background: rgba(40,44,45,.85); }
+
+.message {
+  position: absolute; left: 50%; bottom: 12%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  padding: .5em 1.4em;
+  border-left: 3px solid var(--door);
+  font-size: clamp(13px, 1.6vw, 20px);
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: rise .4s ease both;
+}
+@keyframes rise { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* アイテム欄 */
+.bar {
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap;
+}
+.bar-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: .25em;
+  color: var(--muted);
+}
+.inventory {
+  display: flex; gap: 8px;
+}
+.slot {
+  width: var(--slot); aspect-ratio: 1;
+  background: var(--panel);
+  border: 2px solid rgba(255,255,255,.12);
+  border-radius: 4px;
+  padding: 0; overflow: hidden;
+  cursor: pointer;
+}
+.slot img { width: 100%; height: 100%; object-fit: contain; padding: 10%; box-sizing: border-box; display: block; }
+.slot:empty { cursor: default; }
+.slot.selected { border-color: var(--select); box-shadow: 0 0 0 2px rgba(232,195,90,.35); }
+.slot:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.holding {
+  background: var(--panel);
+  padding: .3em .8em;
+  border-radius: 3px;
+  border-left: 3px solid var(--select);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+/* アイテム入手の表示 */
+.pickup {
+  position: absolute; inset: 0;
+  background: rgba(8, 9, 10, .72);
+  display: grid; place-items: center;
+  cursor: pointer;
+  animation: fade .3s ease both;
+}
+.pickup figure {
+  margin: 0; width: 46%;
+  display: grid; gap: .8em; justify-items: center;
+}
+.pickup img { width: 80%; height: auto; filter: drop-shadow(0 12px 30px rgba(0,0,0,.7)); }
+.pickup figcaption { font-weight: 700; font-size: clamp(14px, 1.8vw, 22px); }
+.pickup small { color: var(--muted); font-size: clamp(10px, 1.1vw, 13px); }
+@keyframes fade { from { opacity: 0; } }
+
+/* スマホ横向き：アイテム欄を右側に縦に並べ、ゲーム画面を高さいっぱいに */
+@media (orientation: landscape) and (max-height: 540px) {
+  body { padding-inline: max(8px, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)); }
+  .game { width: auto; flex-direction: row; align-items: center; gap: 8px; }
+  .stage {
+    width: min(calc(100vw - var(--slot) - 40px), calc((100vh - 12px) * 16 / 9));
+    width: min(calc(100vw - var(--slot) - 40px), calc((100dvh - 12px) * 16 / 9));
+  }
+  .bar { flex-direction: column; flex-wrap: nowrap; gap: 6px; }
+  .inventory { flex-direction: column; gap: 6px; }
+  .bar-label, .holding { display: none !important; }
+}
+
+/* スマホ縦向き：横向きにするよう案内 */
+.rotate {
+  display: none;
+  position: fixed; inset: 0; z-index: 10;
+  background: var(--ground);
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; padding-inline: 24px; text-align: center;
+}
+.rotate .phone {
+  width: 44px; height: 76px;
+  border: 3px solid var(--ink); border-radius: 9px;
+  animation: tilt 2.4s ease-in-out infinite;
+}
+@keyframes tilt { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+.rotate p { margin: 0; font-size: 17px; font-weight: 700; }
+.rotate button {
+  border: 0; background: none; color: var(--muted);
+  font: 500 14px var(--font-ui); text-decoration: underline; cursor: pointer;
+}
+@media (orientation: portrait) and (max-width: 600px) {
+  .rotate { display: flex; }
+}
+body.rotate-ok .rotate { display: none; }
+@media (prefers-reduced-motion: reduce) { .rotate .phone { animation: none; transform: rotate(-90deg); } }
+
+/* タイトル画面・クリア画面 */
+.screen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: clamp(8px, 1.6vw, 20px);
+  background: rgba(10, 11, 12, .78);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  text-align: center;
+  animation: fade .4s ease both;
+}
+#clearScreen { background: rgba(10, 18, 10, .7); }
+.screen .eyebrow {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: clamp(10px, 1.2vw, 14px);
+  letter-spacing: .4em;
+  color: var(--muted);
+}
+.screen h1 {
+  margin: 0;
+  font-size: clamp(22px, 4.2vw, 52px);
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-wrap: balance;
+}
+.screen .hint { margin: 0; color: var(--muted); font-size: clamp(10px, 1.2vw, 14px); }
+.big {
+  margin-top: clamp(6px, 1.2vw, 16px);
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 4px;
+  background: var(--door);
+  color: #fff;
+  font: 700 clamp(14px, 1.8vw, 22px) var(--font-ui);
+  letter-spacing: .1em;
+  padding: .6em 2em;
+  cursor: pointer;
+  transition: filter .15s, transform .15s;
+}
+.big:hover { filter: brightness(1.12); transform: translateY(-1px); }
+.big:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .stage img.view { transition: none; }
+  .message, .pickup, .screen { animation: none; }
+  .big { transition: none; }
+}
+</style>
+
+<div class="rotate" id="rotate">
+  <div class="phone" aria-hidden="true"></div>
+  <p>スマホを横向きにして遊んでください</p>
+  <button id="rotateOk">このまま縦向きで遊ぶ</button>
+</div>
+
+<div class="game">
+<div class="stage" id="stage">
+  <img class="view" id="view" alt="" src="img/south.jpg">
+  <div id="hotspots"></div>
+  <button class="turn left" id="turnLeft" aria-label="左を向く">◀</button>
+  <button class="turn right" id="turnRight" aria-label="右を向く">▶</button>
+  <div class="hud" id="hud"></div>
+  <button class="back" id="back" hidden>↓ 戻る</button>
+  <div class="message" id="message" hidden></div>
+  <div class="screen" id="titleScreen">
+    <p class="eyebrow">ESCAPE GAME</p>
+    <h1>コンクリートの部屋からの脱出</h1>
+    <button class="big" id="startBtn">ゲームスタート</button>
+    <p class="hint">クリックで調べる ／ ◀ ▶ で向きを変える</p>
+  </div>
+  <div class="screen" id="clearScreen" hidden>
+    <p class="eyebrow">ESCAPED</p>
+    <h1>脱出成功！</h1>
+    <button class="big" id="restartBtn">最初に戻る</button>
+  </div>
+  <div class="pickup" id="pickup" hidden>
+    <figure>
+      <img id="pickupImg" alt="">
+      <figcaption id="pickupText"></figcaption>
+      <small>クリックで閉じる</small>
+    </figure>
+  </div>
+</div>
+<!-- アイテム欄（画面の下。スマホ横向きでは右側） -->
+<div class="bar">
+  <span class="bar-label">ITEM</span>
+  <div class="inventory" id="inventory"></div>
+  <div class="holding" id="holding" hidden></div>
+</div>
+</div>
+
+<script>
+// ===== 設定ここから =====
+// 視点の順番（右キーでこの順に回る）
+const DIRS = ["north", "west", "south", "east"];
+const DIR_LABEL = { north: "北", east: "東", south: "南", west: "西" };
+const INVENTORY_SLOTS = 4;
+
+// アイテム：icon はアイテム欄の画像、img は入手時に大きく出す画像
+const ITEMS = {
+  key: { name: "鍵", icon: "img/keyitem_icon.png", img: "img/keyitem.png" },
+};
+
+// シーン：img は画像（状況で変わるなら関数）、hotspots はクリックできる場所（%指定：x, y, 幅, 高さ）
+// 方角以外のシーンは back に戻り先を書く
+const SCENES = {
+  north: { img: "img/north.jpg", hotspots: [
+    { x: 46.6, y: 14.2, w: 6.6, h: 11.5, label: "時計", onClick: () => go("clock") },
+  ]},
+  east:  { img: "img/east.jpg",  hotspots: [
+    // 冷蔵庫の左右の足元（床と壁のすき間あたり）
+    { x: 37.5, y: 74, w: 6.8, h: 13, label: "冷蔵庫の左側", onClick: () => go("fridgeLeft") },
+    { x: 55.7, y: 74, w: 6.8, h: 13, label: "冷蔵庫の右側", onClick: () => go("fridgeRight") },
+  ]},
+
+  // 時計の拡大
+  clock:       { label: "時計",         back: "north", img: "img/clock.jpg",        hotspots: [] },
+  // 冷蔵庫と壁のすき間
+  fridgeLeft:  { label: "冷蔵庫の左側", back: "east",  img: "img/fridge_left.jpg",  hotspots: [] },
+  fridgeRight: { label: "冷蔵庫の右側", back: "east",  img: "img/fridge_right.jpg", hotspots: [] },
+  south: { img: "img/south.jpg", hotspots: [
+    { x: 42.8, y: 31.5, w: 14.5, h: 50, label: "ドア", onClick: () => go("door") },
+  ]},
+  west:  { img: "img/west.jpg",  hotspots: [
+    { x: 19, y: 56, w: 4.4, h: 29, label: "ライトポール", onClick: () => go("light") },
+  ]},
+
+  // ライトポールの足元
+  light: {
+    label: "ライトポールの足元", back: "west",
+    img: () => flags.gotKey ? "img/light2.jpg" : "img/light1.jpg",
+    hotspots: [
+      { x: 49.5, y: 53, w: 6, h: 9.5, label: "鍵", if: () => !flags.gotKey,
+        onClick: () => { flags.gotKey = true; getItem("key"); } },
+    ],
+  },
+
+  // ドアの前（開いていれば door2）
+  door: {
+    label: "ドア", back: "south",
+    img: () => flags.doorOpen ? "img/door2.jpg" : "img/door1.jpg",
+    hotspots: [
+      { x: 37.5, y: 6.5, w: 25, h: 88.5, label: "ドアを開ける", if: () => !flags.doorOpen,
+        onClick: () => {
+          if (flags.unlocked) {                     // 鍵は開いている → 扉を開ける
+            flags.doorOpen = true;
+            sound("creak");                         // ギィー
+            say("ドアが開いた！");
+            render();
+            return;
+          }
+          if (selected === "key") {                 // 鍵を使う → 開錠だけ
+            removeItem("key");
+            flags.unlocked = true;
+            sound("unlock");                        // カチャ
+            say("鍵を使った。カチャッと鍵が開いた");
+            render();
+            return;
+          }
+          sound("rattle");                          // ガチャガチャ
+          say("鍵がかかっている");
+          render();
+        } },
+      // 開いたドアの向こうをクリック → 脱出
+      { x: 46.5, y: 7.4, w: 15.8, h: 86, label: "外に出る", if: () => flags.doorOpen,
+        onClick: () => { $("clearScreen").hidden = false; } },
+    ],
+  },
+};
+// 効果音：録音した音を使いたいときはファイル名を書く（例 rattle: "sound/rattle.mp3"）
+// 空欄（null）なら下の合成音が鳴る
+const SOUND_FILES = { rattle: null, unlock: null, creak: null };
+// ===== 設定ここまで =====
+
+// ---- 効果音（Web Audio で合成） ----
+let actx = null;
+function ctx() {
+  if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+  if (actx.state === "suspended") actx.resume();
+  return actx;
+}
+function noiseBuffer(a, sec) {
+  const buf = a.createBuffer(1, a.sampleRate * sec, a.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return buf;
+}
+// 金属の短い「カチッ」
+function tick(a, t, { freq = 3000, q = 6, dur = 0.05, gain = 0.6, ping = 0 } = {}) {
+  const src = a.createBufferSource();
+  src.buffer = noiseBuffer(a, dur);
+  const bp = a.createBiquadFilter();
+  bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = q;
+  const g = a.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(bp).connect(g).connect(a.destination);
+  src.start(t);
+  if (ping) { // 金属の響き
+    const o = a.createOscillator(), og = a.createGain();
+    o.frequency.value = ping;
+    og.gain.setValueAtTime(gain * 0.15, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    o.connect(og).connect(a.destination);
+    o.start(t); o.stop(t + 0.13);
+  }
+}
+// 低い「ゴトッ」
+function thud(a, t, gain = 0.5) {
+  const o = a.createOscillator(), g = a.createGain();
+  o.frequency.setValueAtTime(140, t);
+  o.frequency.exponentialRampToValueAtTime(60, t + 0.08);
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  o.connect(g).connect(a.destination);
+  o.start(t); o.stop(t + 0.11);
+}
+const SYNTH = {
+  // ガチャガチャ：ノブを2回ひねって引っかかる
+  rattle(a) {
+    const t0 = a.currentTime + 0.02;
+    [0, 0.07, 0.16, 0.3, 0.37, 0.46].forEach((dt, i) => {
+      tick(a, t0 + dt, { freq: 2200 + Math.random() * 1400, dur: 0.06, gain: 0.5, ping: 1800 + Math.random() * 600 });
+      if (i % 3 === 2) thud(a, t0 + dt, 0.35);
+    });
+  },
+  // カチャ：鍵が回って錠が外れる
+  unlock(a) {
+    const t0 = a.currentTime + 0.02;
+    tick(a, t0, { freq: 4200, dur: 0.035, gain: 0.45, ping: 2600 });
+    tick(a, t0 + 0.11, { freq: 2600, q: 4, dur: 0.07, gain: 0.8, ping: 1500 });
+    thud(a, t0 + 0.11, 0.3);
+  },
+  // ギィー：蝶番のきしみ
+  creak(a) {
+    const t0 = a.currentTime + 0.02, dur = 1.5;
+    const o = a.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(70, t0);
+    o.frequency.linearRampToValueAtTime(115, t0 + 0.5);
+    o.frequency.linearRampToValueAtTime(85, t0 + 1.0);
+    o.frequency.linearRampToValueAtTime(130, t0 + dur);
+    const bp = a.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 900; bp.Q.value = 5;
+    // 引っかかりながら擦れる感じ（音量を細かく揺らす）
+    const am = a.createGain(); am.gain.value = 0.5;
+    const lfo = a.createOscillator(); lfo.type = "square"; lfo.frequency.value = 22;
+    const lfoDepth = a.createGain(); lfoDepth.gain.value = 0.5;
+    lfo.connect(lfoDepth).connect(am.gain);
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.001, t0);
+    g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.15);
+    g.gain.setValueAtTime(0.5, t0 + dur - 0.4);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.connect(bp).connect(am).connect(g).connect(a.destination);
+    o.start(t0); lfo.start(t0);
+    o.stop(t0 + dur); lfo.stop(t0 + dur);
+  },
+};
+function sound(name) {
+  try {
+    if (SOUND_FILES[name]) { new Audio(SOUND_FILES[name]).play().catch(() => {}); return; }
+    SYNTH[name](ctx());
+  } catch (e) { /* 音が出せない環境では無音で続行 */ }
+}
+
+let flags, scene, inventory, selected, message;
+function resetGame() {
+  flags = { gotKey: false, unlocked: false, doorOpen: false };
+  scene = "south";
+  inventory = [];
+  selected = null;
+  message = "";
+}
+resetGame();
+
+const $ = (id) => document.getElementById(id);
+const imgOf = (s) => typeof s.img === "function" ? s.img() : s.img;
+
+// 画像を先読み
+["north","east","south","west","door1","door2","light1","light2","clock","fridge_left","fridge_right"]
+  .forEach(n => { const i = new Image(); i.src = `img/${n}.jpg`; });
+Object.values(ITEMS).forEach(it => [it.icon, it.img].forEach(src => { const i = new Image(); i.src = src; }));
+
+function say(text) { message = text; }
+
+function getItem(id) {
+  if (!inventory.includes(id)) inventory.push(id);
+  $("pickupImg").src = ITEMS[id].img;
+  $("pickupText").textContent = `${ITEMS[id].name}を手に入れた`;
+  $("pickup").hidden = false;
+  render();
+}
+function removeItem(id) {
+  inventory = inventory.filter(i => i !== id);
+  if (selected === id) selected = null;
+}
+
+function render() {
+  const s = SCENES[scene];
+  const view = $("view");
+  const src = imgOf(s);
+  if (!view.src.endsWith(src)) {
+    view.classList.add("fading");
+    setTimeout(() => { view.src = src; view.classList.remove("fading"); }, 120);
+  }
+
+  const box = $("hotspots");
+  box.innerHTML = "";
+  s.hotspots.filter(h => !h.if || h.if()).forEach(h => {
+    const b = document.createElement("button");
+    b.className = "hotspot";
+    b.style.left = h.x + "%"; b.style.top = h.y + "%";
+    b.style.width = h.w + "%"; b.style.height = h.h + "%";
+    b.setAttribute("aria-label", h.label);
+    b.addEventListener("click", () => { message = ""; h.onClick(); });
+    box.appendChild(b);
+  });
+
+  const isRoom = DIRS.includes(scene);
+  $("turnLeft").hidden = !isRoom;
+  $("turnRight").hidden = !isRoom;
+  $("back").hidden = isRoom;
+  $("hud").innerHTML = isRoom
+    ? `<b>${DIR_LABEL[scene]}</b>の壁`
+    : `<b>${s.label}</b>を調べている`;
+
+  // アイテム欄
+  const inv = $("inventory");
+  inv.innerHTML = "";
+  for (let i = 0; i < INVENTORY_SLOTS; i++) {
+    const id = inventory[i];
+    const slot = document.createElement("button");
+    slot.className = "slot" + (id && id === selected ? " selected" : "");
+    if (id) {
+      slot.setAttribute("aria-label", ITEMS[id].name);
+      slot.innerHTML = `<img src="${ITEMS[id].icon}" alt="">`;
+      slot.addEventListener("click", () => {
+        selected = selected === id ? null : id;
+        render();
+      });
+    } else {
+      slot.disabled = true;
+      slot.setAttribute("aria-label", "空き");
+    }
+    inv.appendChild(slot);
+  }
+  $("holding").hidden = !selected;
+  if (selected) $("holding").textContent = `${ITEMS[selected].name}を手に持っている`;
+
+  const msg = $("message");
+  msg.hidden = !message;
+  if (message) {
+    // 同じ文でもアニメーションをやり直す
+    msg.textContent = message;
+    msg.style.animation = "none"; msg.offsetHeight; msg.style.animation = "";
+  }
+}
+
+function go(next) { scene = next; render(); }
+function turn(step) {
+  if (!DIRS.includes(scene)) return;
+  const i = DIRS.indexOf(scene);
+  message = "";
+  go(DIRS[(i + step + DIRS.length) % DIRS.length]);
+}
+function back() {
+  const b = SCENES[scene].back;
+  if (b) { message = ""; go(b); }
+}
+function closePickup() { $("pickup").hidden = true; }
+
+$("turnLeft").addEventListener("click", () => turn(-1));
+$("turnRight").addEventListener("click", () => turn(1));
+$("back").addEventListener("click", back);
+$("pickup").addEventListener("click", closePickup);
+$("startBtn").addEventListener("click", () => {
+  try { ctx(); } catch (e) {}   // 効果音を鳴らせるようにしておく
+  $("titleScreen").hidden = true;
+  // スマホなら全画面＋横向き固定を試す（対応していない端末では何もしない）
+  if (matchMedia("(pointer: coarse)").matches) {
+    try {
+      const el = document.documentElement;
+      const fs = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (fs) Promise.resolve(fs.call(el))
+        .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape"))
+        .catch(() => {});
+    } catch (e) {}
+  }
+});
+$("rotateOk").addEventListener("click", () => document.body.classList.add("rotate-ok"));
+$("restartBtn").addEventListener("click", () => {
+  resetGame();
+  closePickup();
+  $("clearScreen").hidden = true;
+  $("titleScreen").hidden = false;
+  render();
+});
+document.addEventListener("keydown", (e) => {
+  if (!$("titleScreen").hidden || !$("clearScreen").hidden) return;
+  if (!$("pickup").hidden) {
+    if (["Enter", " ", "Escape"].includes(e.key)) { closePickup(); e.preventDefault(); }
+    return;
+  }
+  if (e.key === "ArrowLeft") { turn(-1); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { turn(1); e.preventDefault(); }
+  else if (e.key === "ArrowDown" || e.key === "Escape") { back(); e.preventDefault(); }
+  else if (e.key === "h" || e.key === "H") { $("stage").classList.toggle("debug"); } // クリック範囲を表示
+});
+
+render();
+</script>
+
+</html>
